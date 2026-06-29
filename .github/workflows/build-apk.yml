@@ -126,6 +126,18 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-gradle-caches-
 
+      - name: Inject string resources
+        run: |
+          cat > android/app/src/main/res/values/strings.xml << 'XMLEOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+            <string name="app_name">Raptor Flex Driver</string>
+            <string name="TRANSISTORSOFT_LICENSE_KEY">${{ secrets.TRANSISTORSOFT_LICENSE_KEY }}</string>
+            <string name="FACEBOOK_APP_ID">${{ secrets.FACEBOOK_APP_ID }}</string>
+            <string name="FACEBOOK_CLIENT_TOKEN">${{ secrets.FACEBOOK_CLIENT_TOKEN }}</string>
+          </resources>
+          XMLEOF
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
