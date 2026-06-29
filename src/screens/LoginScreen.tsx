@@ -41,7 +41,7 @@ const LoginScreen = () => {
                 throw new Error('No se obtuvo el token de Google');
             }
 
-            const response = await fetch('https://api.raptor-flex.com/int/v1/auth/google', {
+            const response = await fetch('https://api.raptor-flex.com/v1/drivers/login-with-google', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id_token: idToken, for: 'driver' }),
