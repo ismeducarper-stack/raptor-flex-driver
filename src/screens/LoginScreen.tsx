@@ -1,78 +1,114 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigation } from '@react-navigation/native';
-import { SafeAreaView, Image, StyleSheet, Dimensions } from 'react-native';
+import { SafeAreaView } from 'react-native';
+import Svg, { Path, Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Spinner, Stack, Text, YStack, XStack, useTheme, Button } from 'tamagui';
-import { FontAwesomeIcon } from '@fortawesome/react-native-fontawesome';
-import { faPlug } from '@fortawesome/free-solid-svg-icons';
-import { toast, ToastPosition } from '@backpackapp-io/react-native-toast';
-import { titleize } from '../utils/format';
-import { navigatorConfig } from '../utils';
-import { PhoneLoginButton, AppleLoginButton, FacebookLoginButton, GoogleLoginButton } from '../components/Buttons';
-import useOAuth from '../hooks/use-oauth';
-import LinearGradient from 'react-native-linear-gradient';
-import DeviceInfo from 'react-native-device-info';
+import { Spinner, YStack, Text, Button } from 'tamagui';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import Config from 'react-native-config';
+import { useAuth } from '../contexts/AuthContext';
+
+const RaptorLogo = () => (
+    <Svg viewBox='0 0 84 100' width={84} height={100}>
+        <Rect width='84' height='100' fill='#111827' />
+        <Path d='M0 0L16 0L44 100L28 100Z' fill='#F5C800' fillOpacity={1} />
+        <Path d='M22 0L38 0L66 100L50 100Z' fill='#F5C800' fillOpacity={0.82} />
+        <Path d='M44 0L58 0L84 100L70 100Z' fill='#F5C800' fillOpacity={0.62} />
+    </Svg>
+);
 
 const LoginScreen = () => {
-    const navigation = useNavigation();
-    const theme = useTheme();
     const insets = useSafeAreaInsets();
-    const windowHeight = Dimensions.get('window').height;
-    const { login, loginSupported, loading } = useOAuth();
+    const { createDriverSession } = useAuth();
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
-    const handlePhoneLogin = () => {
-        navigation.navigate('PhoneLogin');
-    };
+    useEffect(() => {
+        GoogleSignin.configure({
+            webClientId: Config.GOOGLE_WEB_CLIENT_ID || '',
+        });
+    }, []);
 
-    const handleOAuthLogin = async (provider) => {
+    const handleGoogleLogin = async () => {
+        setLoading(true);
+        setError(null);
+
         try {
-            const response = await login(provider);
-            toast.success(`Logged in with ${titleize(provider)}`);
-        } catch (err) {
-            console.warn('Error attempting OAuth login:', err);
+            await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+            const result = await GoogleSignin.signIn();
+            const idToken = result?.data?.idToken;
+
+            if (!idToken) {
+                throw new Error('No se obtuvo el token de Google');
+            }
+
+            const response = await fetch('https://api.raptor-flex.com/int/v1/auth/google', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_token: idToken, for: 'driver' }),
+            });
+
+            if (response.status === 403) {
+                setError('No tienes acceso a Raptor Flex Driver');
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error(`Error del servidor: ${response.status}`);
+            }
+
+            const data = await response.json();
+            await createDriverSession(data.driver ?? data);
+        } catch (err: any) {
+            if (err?.code === 'SIGN_IN_CANCELLED') {
+                // user cancelled, no action needed
+            } else if (err?.message?.toLowerCase().includes('network') || err?.code === 'NETWORK_ERROR') {
+                setError('Sin conexión a Internet. Verifica tu red e intenta de nuevo.');
+            } else if (err?.message) {
+                setError(err.message);
+            } else {
+                setError('Error al iniciar sesión. Intenta de nuevo.');
+            }
+        } finally {
+            setLoading(false);
         }
     };
 
-    const handleOpenInstanceLink = () => {
-        navigation.navigate('InstanceLink');
-    };
-
     return (
-        <YStack flex={1} height='100%' width='100%' bg={navigatorConfig('colors.loginBackground')} position='relative'>
-            <LinearGradient colors={['rgba(0, 0, 0, 0.0)', 'rgba(0, 0, 0, 0.4)', 'rgba(0, 0, 0, 0.8)']} style={StyleSheet.absoluteFillObject} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
-            <YStack justifyContent='center' alignItems='center' paddingTop={insets.top} marginTop={windowHeight / 3}>
-                <Image source={require('../../assets/navigator-icon-transparent.png')} style={{ width: 60, height: 60 }} />
-            </YStack>
+        <YStack flex={1} bg='#111827' position='relative'>
             <SafeAreaView style={{ flex: 1 }}>
-                <YStack flex={1} justifyContent='flex-end' alignItems='center' space='$3' px='$5' pb='$6'>
-                    <PhoneLoginButton onPress={handlePhoneLogin} />
-                    <Text color='$textSecondary' fontSize='$2'>
-                        v{DeviceInfo.getVersion()} #{DeviceInfo.getBuildNumber()}
-                    </Text>
+                <YStack flex={1} alignItems='center' justifyContent='space-between' px='$5' pt={insets.top + 40} pb={insets.bottom + 24}>
+                    <YStack alignItems='center' space='$4'>
+                        <RaptorLogo />
+                        <Text color='#FFFFFF' fontSize={24} fontWeight='700' letterSpacing={2}>
+                            RAPTOR FLEX
+                        </Text>
+                        <Text color='#F5C800' fontSize={13} letterSpacing={4}>
+                            DRIVER
+                        </Text>
+                    </YStack>
+
+                    <YStack width='100%' space='$3'>
+                        {error !== null && (
+                            <Text color='#EF4444' textAlign='center' fontSize='$3'>
+                                {error}
+                            </Text>
+                        )}
+                        <Button onPress={handleGoogleLogin} bg='#F5C800' width='100%' height={52} disabled={loading} pressStyle={{ opacity: 0.8 }}>
+                            <Button.Text color='#111827' fontWeight='700' fontSize='$4'>
+                                Continuar con Google
+                            </Button.Text>
+                        </Button>
+                    </YStack>
                 </YStack>
             </SafeAreaView>
-            <YStack position='absolute' top={0} right={0} pt={insets.top}>
-                <Button onPress={handleOpenInstanceLink} bg='transparent'>
-                    <Button.Icon>
-                        <FontAwesomeIcon icon={faPlug} color={theme['$textSecondary'].val} />
-                    </Button.Icon>
-                </Button>
-            </YStack>
+
             {loading && (
                 <YStack justifyContent='center' alignItems='center' bg='rgba(0, 0, 0, 0.6)' position='absolute' top={0} bottom={0} left={0} right={0}>
-                    <Spinner size='large' color='white' />
+                    <Spinner size='large' color='#F5C800' />
                 </YStack>
             )}
         </YStack>
     );
 };
-
-const styles = StyleSheet.create({
-    background: {
-        flex: 1,
-        width: '100%',
-        height: '100%',
-    },
-});
 
 export default LoginScreen;
