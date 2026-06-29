@@ -39,6 +39,7 @@ import OrderCommentThread from '../components/OrderCommentThread';
 import OrderProofOfDelivery from '../components/OrderProofOfDelivery';
 import CurrentDestinationSelect from '../components/CurrentDestinationSelect';
 import OrderActivitySelect from '../components/OrderActivitySelect';
+import RecipientDataModal from '../components/RecipientDataModal';
 import LoadingOverlay from '../components/LoadingOverlay';
 import DestinationChangedAlert from '../components/DestinationChangedAlert';
 import Badge from '../components/Badge';
@@ -97,6 +98,10 @@ const OrderScreen = ({ route }) => {
     const [showDestAlert, setShowDestAlert] = useState(false);
     const [prevDest, setPrevDest] = useState<any>(null);
     const [currDest, setCurrDest] = useState<any>(null);
+    // Recipient confirmation modal state
+    const [showRecipientModal, setShowRecipientModal] = useState(false);
+    const pendingPodActivityRef = useRef<any>(null);
+    const recipientDataRef = useRef<{ nombre: string; rut: string } | null>(null);
 
     const destination = useMemo(() => {
         const pickup = order.getAttribute('payload.pickup');
@@ -317,7 +322,10 @@ const OrderScreen = ({ route }) => {
 
             if (activity.require_pod && !proof) {
                 activitySheetRef.current?.closeBottomSheet();
-                return navigation.navigate('ProofOfDelivery', { activity, order: order.serialize(), waypoint: destination.serialize() });
+                pendingPodActivityRef.current = activity;
+                setActivityLoading(null);
+                setShowRecipientModal(true);
+                return;
             }
 
             // Track current destination
@@ -332,6 +340,16 @@ const OrderScreen = ({ route }) => {
                 setNextActivity([]);
                 setLoadingOverlayMessage(null);
                 toast.success(`Order status updated to: ${activity._resolved_status ?? activity.status}`);
+
+                if (recipientDataRef.current) {
+                    const { nombre, rut } = recipientDataRef.current;
+                    recipientDataRef.current = null;
+                    try {
+                        await adapter.patch(`orders/${order.id}`, { notes: `NOMBRE: ${nombre} | RUT: ${rut}` });
+                    } catch (notesErr) {
+                        console.warn('Error sending recipient notes:', notesErr);
+                    }
+                }
 
                 const currentDestination = getOrderDestination(updatedOrder, adapter);
                 const shouldNotifyUserDestinationChanged = activity.complete && updatedOrder.status !== 'completed' && previousDestination?.id !== currentDestination?.id;
@@ -351,6 +369,25 @@ const OrderScreen = ({ route }) => {
         },
         [order]
     );
+
+    const handleRecipientConfirm = useCallback(
+        (nombre: string, rut: string) => {
+            setShowRecipientModal(false);
+            recipientDataRef.current = { nombre, rut };
+            const activity = pendingPodActivityRef.current;
+            pendingPodActivityRef.current = null;
+            if (activity) {
+                navigation.navigate('ProofOfDelivery', { activity, order: order.serialize(), waypoint: destination.serialize() });
+            }
+        },
+        [order, destination, navigation]
+    );
+
+    const handleRecipientCancel = useCallback(() => {
+        setShowRecipientModal(false);
+        pendingPodActivityRef.current = null;
+        setActivityLoading(null);
+    }, []);
 
     const completeOrder = useCallback(
         async (activity) => {
@@ -692,6 +729,11 @@ const OrderScreen = ({ route }) => {
                 portalHost='OrderScreenPortal'
             />
             <PortalHost name='OrderScreenPortal' />
+            <RecipientDataModal
+                visible={showRecipientModal}
+                onConfirm={handleRecipientConfirm}
+                onCancel={handleRecipientCancel}
+            />
         </YStack>
     );
 };
