@@ -1,0 +1,150 @@
+name: Build APK Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'yarn'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Activate Yarn 3.6.4
+        run: corepack prepare yarn@3.6.4 --activate
+
+      - name: Install dependencies
+        run: yarn install --immutable
+
+      - name: Create .env file
+        run: |
+          echo "APP_NAME=Raptor Flex Driver" > .env
+          echo "APP_IDENTIFIER=com.raptorflex.driver" >> .env
+          echo "APP_LINK_PREFIX=raptorflex://" >> .env
+          echo "FLEETBASE_HOST=https://api.raptor-flex.com" >> .env
+          echo "APP_THEME=custom" >> .env
+          echo "LOGIN_BG_COLOR=#111827" >> .env
+          echo "GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}" >> .env
+          echo "FLEETBASE_KEY=${{ secrets.FLEETBASE_KEY }}" >> .env
+
+      - name: Create google-services.json
+        run: |
+          cat > android/app/google-services.json << 'EOF'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "raptor-flex-placeholder",
+              "storage_bucket": "raptor-flex-placeholder.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+                  "android_client_info": {
+                    "package_name": "com.raptorflex.driver"
+                  }
+                },
+                "oauth_client": [],
+                "api_key": [{ "current_key": "placeholder" }],
+                "services": {
+                  "appinvite_service": {
+                    "other_platform_oauth_client": []
+                  }
+                }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          EOF
+
+      - name: Setup Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Ninja
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y ninja-build
+
+      - name: Setup Android SDK / NDK / CMake
+        env:
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          set -e
+          if [ -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDKMGR="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          else
+            SDKMGR=$(ls -1d "$ANDROID_SDK_ROOT/cmdline-tools"/*/bin/sdkmanager 2>/dev/null | head -n1)
+          fi
+          yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
+          need() {
+            local p="$1"
+            "$SDKMGR" --list_installed | grep -q "^  $p$" || "$SDKMGR" "$p"
+          }
+          need "platforms;android-35"
+          need "build-tools;35.0.0"
+          need "ndk;27.1.12297006"
+          need "cmake;3.22.1"
+
+      - name: Setup Android keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/raptor-flex.keystore
+          {
+            echo "ANDROID_NAVIGATOR_APP_UPLOAD_STORE_FILE=$GITHUB_WORKSPACE/android/app/raptor-flex.keystore"
+            echo "ANDROID_NAVIGATOR_APP_UPLOAD_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}"
+            echo "ANDROID_NAVIGATOR_APP_UPLOAD_KEY_ALIAS=${{ secrets.KEY_ALIAS }}"
+            echo "ANDROID_NAVIGATOR_APP_UPLOAD_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}"
+          } >> android/gradle.properties
+
+      - name: Cache Gradle wrapper
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-wrapper-${{ hashFiles('**/gradle-wrapper.properties') }}
+
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: ${{ runner.os }}-gradle-caches-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-caches-
+
+      - name: Make gradlew executable
+        run: chmod +x android/gradlew
+
+      - name: Build Android release APK
+        run: cd android && ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: raptor-flex-driver-release
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Raptor Flex Driver ${{ github.ref_name }}" \
+            --generate-notes \
+            android/app/build/outputs/apk/release/app-release.apk
