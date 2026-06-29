@@ -131,6 +131,9 @@ jobs:
           </resources>
           XMLEOF
 
+      - name: Clear Gradle transform cache
+        run: rm -rf ~/.gradle/caches/transforms-*
+
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
