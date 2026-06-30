@@ -22,12 +22,14 @@ buildscript {
         }
     }
     dependencies {
-        classpath("com.android.tools.build:gradle:3.5.4")
-        classpath("com.facebook.react:react-native-gradle-plugin")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.0")
+        classpath("com.android.tools.build:gradle:8.7.2")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21")
         classpath('com.google.gms:google-services:4.3.15')
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
     }
+}
+
+plugins {
+    id "com.facebook.react.rootproject"
 }
 
 allprojects {
@@ -37,5 +39,3 @@ allprojects {
         maven { url("${project(':react-native-background-fetch').projectDir}/libs") }
     }
 }
-
-apply plugin: "com.facebook.react.rootproject"
