@@ -2502,7 +2502,7 @@ __metadata:
     react-native-reanimated: 3.15.4
     react-native-render-html: ^6.3.4
     react-native-safe-area-context: ^5.0.0
-    react-native-screens: ^4.3.0
+    react-native-screens: ~4.4.0
     react-native-share: ^12.0.9
     react-native-signature-canvas: ^4.7.2
     react-native-snap-carousel: ^3.9.1
@@ -15463,16 +15463,16 @@ __metadata:
   languageName: node
   linkType: hard
 
-"react-native-screens@npm:^4.3.0":
-  version: 4.25.2
-  resolution: "react-native-screens@npm:4.25.2"
+"react-native-screens@npm:~4.4.0":
+  version: 4.4.0
+  resolution: "react-native-screens@npm:4.4.0"
   dependencies:
     react-freeze: ^1.0.0
     warn-once: ^0.1.0
   peerDependencies:
     react: "*"
-    react-native: ">=0.82.0"
-  checksum: 075cb46262eba276a7af67e036d6d4eabf8d0964e2abf3efde33dbff3ddcdbe3e69d3b323363152e1e7fe9b36da614faf650c81dbc00e820594ce188d024dbbf
+    react-native: "*"
+  checksum: 6e90539e8eb79ba4b3fd23f6c27b943e3595c9c275b3002e6b376eb0a1c17521bde9b05d0b2c4c7ab67042f20bdbec87c3d1e3d182a531b7e3115a2dace0e912
   languageName: node
   linkType: hard
 
