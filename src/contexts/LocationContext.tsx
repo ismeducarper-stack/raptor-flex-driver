@@ -1,8 +1,9 @@
-import React, { createContext, useState, useEffect, useCallback, useContext, useMemo } from 'react';
-import BackgroundGeolocation from 'react-native-background-geolocation';
+import React, { createContext, useState, useEffect, useCallback, useContext, useMemo, useRef } from 'react';
+import Geolocation from '@react-native-community/geolocation';
+import { PermissionsAndroid, Platform } from 'react-native';
 import BackgroundFetch from 'react-native-background-fetch';
 import { Place, Point } from '@fleetbase/sdk';
-import { isEmpty, config } from '../utils';
+import { isEmpty } from '../utils';
 import { useAuth } from './AuthContext';
 import useStorage from '../hooks/use-storage';
 import useFleetbase from '../hooks/use-fleetbase';
@@ -14,31 +15,61 @@ const LocationContext = createContext({
     stopTracking: () => {},
 });
 
+const requestLocationPermission = async (): Promise<boolean> => {
+    if (Platform.OS !== 'android') return true;
+    try {
+        const fine = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION, {
+            title: 'Location Permission',
+            message: 'This app needs access to your location to track your position.',
+            buttonPositive: 'Allow',
+            buttonNegative: 'Deny',
+        });
+        if (fine !== PermissionsAndroid.RESULTS.GRANTED) return false;
+
+        // Android 10+ requires a separate prompt for background location
+        if (Platform.Version >= 29) {
+            const background = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION, {
+                title: 'Background Location Permission',
+                message: 'This app needs access to your location even when closed or in the background.',
+                buttonPositive: 'Allow',
+                buttonNegative: 'Deny',
+            });
+            return background === PermissionsAndroid.RESULTS.GRANTED;
+        }
+        return true;
+    } catch (err) {
+        console.warn('[Geolocation] Error requesting location permission:', err);
+        return false;
+    }
+};
+
 export const LocationProvider = ({ children }) => {
     const { isOnline, driver, trackDriver } = useAuth();
     const { adapter } = useFleetbase();
     const [authToken] = useStorage('_driver_token');
     const [location, setLocation] = useStorage(`${driver?.id ?? 'anon'}_location`, {});
     const [isTracking, setIsTracking] = useState(false);
+    const watchIdRef = useRef<number | null>(null);
 
-    // Manually track location
+    // Manually get current position and push it upstream
     const trackLocation = useCallback(async () => {
-        try {
-            const location = await BackgroundGeolocation.getCurrentPosition({
-                samples: 3,
-                desiredAccuracy: 1,
-                extras: {
-                    event: 'getCurrentPosition',
+        return new Promise<void>((resolve) => {
+            Geolocation.getCurrentPosition(
+                (position) => {
+                    setLocation(position);
+                    trackDriver(position.coords);
+                    resolve();
                 },
-            });
-            setLocation(location);
-            trackDriver(location.coords);
-        } catch (error) {
-            console.warn('Error attempting to track and update location:', error);
-        }
+                (error) => {
+                    console.warn('[Geolocation] Error getting current position:', error);
+                    resolve();
+                },
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+            );
+        });
     }, [trackDriver]);
 
-    // Get the drivers location as a Place
+    // Get the driver's location as a Fleetbase Place object
     const getDriverLocationAsPlace = useCallback(
         (attributes = {}) => {
             const { coords } = location;
@@ -57,101 +88,68 @@ export const LocationProvider = ({ children }) => {
         [location, adapter]
     );
 
-    // Get the HTTP configuration for background geolocation tracking
-    const getHttpConfig = useCallback(() => {
-        if (!adapter || !driver || !authToken) return {};
+    // Start continuous position watching
+    const startTracking = useCallback(async () => {
+        const granted = await requestLocationPermission();
+        if (!granted) {
+            console.warn('[Geolocation] Location permission not granted');
+            return;
+        }
 
-        return {
-            url: `${adapter.host}/${adapter.namespace}/drivers/${driver.id}/track`,
-            headers: {
-                Authorization: `Bearer ${authToken}`,
-                'Content-Type': 'application/json',
-                'User-Agent': '@fleetbase/navigator-app',
+        if (watchIdRef.current !== null) return; // already watching
+
+        watchIdRef.current = Geolocation.watchPosition(
+            (position) => {
+                console.log('[Geolocation] onLocation:', position);
+                setLocation(position);
+                trackDriver(position.coords);
             },
-            httpRootProperty: '.',
-            locationTemplate:
-                '{"latitude":<%= latitude %>,"longitude":<%= longitude %>,"heading":<%= heading %>,"speed":<%= speed %>,"altitude":<%= altitude %>,"timestamp":"<%= timestamp %>","activity":"<%= activity.type %>","is_moving":<%= is_moving %>,"battery":{"level":<%= battery.level %>,"is_charging":<%= battery.is_charging %>}}',
-        };
-    }, [adapter, driver, authToken]);
-
-    // Callback to handle activity updates.
-    const onMotionChange = useCallback(
-        (event) => {
-            console.log('[BackgroundGeolocation] onMotionChange:', event);
-            if (event.location) {
-                onLocation(event.location);
-            }
-        },
-        [onLocation]
-    );
-
-    // Callback to handle location updates.
-    const onLocation = useCallback((location) => {
-        console.log('[BackgroundGeolocation] onLocation:', location);
-        setLocation(location);
-    }, []);
-
-    // Callback to handle location errors.
-    const onLocationError = useCallback((error) => {
-        console.warn('[BackgroundGeolocation] onLocationError:', error);
-    }, []);
-
-    // Function to start tracking.
-    const startTracking = useCallback(() => {
-        BackgroundGeolocation.start(() => {
-            setIsTracking(true);
-            console.log('[BackgroundGeolocation] Tracking started');
-        });
-    }, []);
-
-    // Function to stop tracking.
-    const stopTracking = useCallback(() => {
-        BackgroundGeolocation.stop(() => {
-            setIsTracking(false);
-            console.log('[BackgroundGeolocation] Tracking stopped');
-        });
-    }, []);
-
-    useEffect(() => {
-        if (!driver) return;
-
-        BackgroundGeolocation.ready(
+            (error) => {
+                console.warn('[Geolocation] onLocationError:', error);
+            },
             {
-                backgroundPermissionRationale: {
-                    title: `Allow ${config('APP_NAME')} to access your location`,
-                    message: `${config('APP_NAME')} collects location data to update your position in real-time, even when the app is closed or running in the background. This allows dispatchers and ops teams to track your progress and provide better support while you drive.`,
-                    positiveAction: 'Allow',
-                    negativeAction: 'Deny',
-                },
-                desiredAccuracy: BackgroundGeolocation.DESIRED_ACCURACY_HIGH,
+                enableHighAccuracy: true,
                 distanceFilter: 10,
-                stopOnTerminate: false,
-                startOnBoot: true,
-                stopTimeout: 1,
-                debug: false,
-                ...getHttpConfig(),
-            },
-            (state) => {
-                console.log('[BackgroundGeolocation] is ready:', state);
-                if (isOnline) {
-                    startTracking();
-                }
+                interval: 5000,
+                fastestInterval: 2000,
             }
         );
+        setIsTracking(true);
+        console.log('[Geolocation] Tracking started');
+    }, [trackDriver]);
 
-        // Subscribe to location events.
-        BackgroundGeolocation.onLocation(onLocation, onLocationError);
+    // Stop continuous position watching
+    const stopTracking = useCallback(() => {
+        if (watchIdRef.current !== null) {
+            Geolocation.clearWatch(watchIdRef.current);
+            watchIdRef.current = null;
+        }
+        setIsTracking(false);
+        console.log('[Geolocation] Tracking stopped');
+    }, []);
 
-        // Subscribe to motion and activity events.
-        BackgroundGeolocation.onMotionChange(onMotionChange);
+    // Start or stop tracking when the driver comes online/offline
+    useEffect(() => {
+        if (!driver) return;
+        if (isOnline) {
+            startTracking();
+        } else {
+            stopTracking();
+        }
 
-        // Clean up the listener when unmounting.
+        if (isEmpty(location) && driver) {
+            trackLocation();
+        }
+    }, [driver, isOnline, startTracking, stopTracking]);
+
+    // Clean up the watcher on unmount
+    useEffect(() => {
         return () => {
-            BackgroundGeolocation.removeListeners();
+            stopTracking();
         };
-    }, [driver, onLocation, onLocationError, onMotionChange, isOnline, getHttpConfig]);
+    }, []);
 
-    // Configure BackgroundFetch for periodic tasks.
+    // Configure BackgroundFetch for periodic location updates when app is backgrounded
     useEffect(() => {
         BackgroundFetch.configure(
             {
@@ -169,21 +167,7 @@ export const LocationProvider = ({ children }) => {
         );
     }, [trackLocation]);
 
-    // Toggle tracking based on the driver's online status.
-    useEffect(() => {
-        if (!driver) return;
-        if (isOnline) {
-            startTracking();
-        } else {
-            stopTracking();
-        }
-
-        if (isEmpty(location) && driver) {
-            trackLocation();
-        }
-    }, [driver, isOnline, startTracking, stopTracking]);
-
-    // Memoize the context value to prevent unnecessary re-renders.
+    // Memoize the context value to prevent unnecessary re-renders
     const value = useMemo(
         () => ({ location, isTracking, startTracking, stopTracking, getDriverLocationAsPlace, trackLocation }),
         [location, isTracking, startTracking, stopTracking, getDriverLocationAsPlace, trackLocation]
