@@ -1,4 +1,4 @@
-import BackgroundGeolocation from 'react-native-background-geolocation';
+import Geolocation from '@react-native-community/geolocation';
 import { Platform } from 'react-native';
 import { EventRegister } from 'react-native-event-listeners';
 import { checkMultiple, request, PERMISSIONS, RESULTS } from 'react-native-permissions';
@@ -216,14 +216,7 @@ export function serializGoogleAddress(googleAddress) {
 
 export async function getLiveLocation(adapter) {
     return new Promise((resolve) => {
-        BackgroundGeolocation.getCurrentPosition(
-            {
-                samples: 3,
-                desiredAccuracy: 1,
-                extras: {
-                    event: 'getCurrentPosition',
-                },
-            },
+        Geolocation.getCurrentPosition(
             async (position) => {
                 const { latitude, longitude } = position.coords;
 
@@ -257,14 +250,7 @@ export async function getCurrentLocation(adapter) {
     const lastLocation = restoreFleetbasePlace(storage.getMap('_current_location'), adapter);
 
     return new Promise((resolve) => {
-        BackgroundGeolocation.getCurrentPosition(
-            {
-                samples: 3,
-                desiredAccuracy: 1,
-                extras: {
-                    event: 'getCurrentPosition',
-                },
-            },
+        Geolocation.getCurrentPosition(
             async (position) => {
                 const { latitude, longitude } = position.coords;
 
