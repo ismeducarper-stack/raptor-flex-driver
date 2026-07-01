@@ -3,8 +3,6 @@ buildscript {
     ext {
         googlePlayServicesVersion = "+"
         playServicesLocationVersion = "21.0.1"
-        firebaseMessagingVersion = "22.0.0"
-        firebaseVersion = "22.0.0"
         buildToolsVersion = "35.0.0"
         minSdkVersion = 24
         compileSdkVersion = 35
@@ -24,7 +22,6 @@ buildscript {
     dependencies {
         classpath("com.android.tools.build:gradle:8.7.2")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21")
-        classpath('com.google.gms:google-services:4.3.15')
     }
 }
 
